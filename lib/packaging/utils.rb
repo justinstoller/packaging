@@ -1,5 +1,6 @@
 # Utility methods used by the various rake tasks
 
+
 def check_tool(tool)
   return true if has_tool(tool)
   fail "#{tool} tool not found...exiting"

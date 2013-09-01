@@ -1,4 +1,12 @@
-# Load packaging repo tasks
+unless Kernel.respond_to? :require_relative
+  def require_relative( lib )
+    require File.expand_path( File.dirname(__FILE__) + lib )
+  end
+end
+
+# Load packaging tasks
+
+require_relative 'lib/packaging/utils'
 
 # These are ordered
 
@@ -6,8 +14,7 @@ PACKAGING_PATH = File.join(File.dirname(__FILE__), 'tasks')
 
 @using_loader = true
 
-[ '00_utils.rake',
-  '10_setupvars.rake',
+[ '10_setupvars.rake',
   '20_setupextravars.rake',
   '30_metrics.rake',
   'apple.rake',
