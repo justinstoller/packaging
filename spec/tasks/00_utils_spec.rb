@@ -1,6 +1,6 @@
 # -*- ruby -*-
 require 'spec_helper'
-load_task '00_utils.rake'
+load File.expand_path( __FILE__ + '../../../../packaging.rake' )
 load_task 'build.rake'
 
 describe "00_utils" do
