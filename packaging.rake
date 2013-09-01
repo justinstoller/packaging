@@ -6,7 +6,8 @@ end
 
 # Load packaging tasks
 
-require_relative 'lib/packaging/utils'
+require_relative 'lib/packaging'
+include Packaging::Utils
 
 # These are ordered
 
