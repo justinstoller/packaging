@@ -1,9 +1,11 @@
 # -*- ruby -*-
 require 'spec_helper'
-load File.expand_path( __FILE__ + '../../../../packaging.rake' )
-load_task 'build.rake'
+load File.expand_path( __FILE__ + '../../../../lib/packaging/utils.rb' )
+load File.expand_path( __FILE__ + '../../../../lib/packaging/build_instance.rb' )
 
 describe "00_utils" do
+  include Packaging::Utils
+
   TestVersions = {
     '0.7.0'                       => {
       :git_describe_version       => %w{0.7.0},
@@ -80,7 +82,7 @@ describe "00_utils" do
   }
 
   before :all do
-    @build = Build::BuildInstance.new
+    @build = Packaging::BuildInstance.new
   end
 
   TestVersions.keys.sort.each do |input|

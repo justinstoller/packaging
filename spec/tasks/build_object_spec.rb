@@ -1,10 +1,10 @@
 # -*- ruby -*-
 require 'spec_helper'
-load_task '00_utils.rake'
-load_task 'build.rake'
+load File.expand_path( __FILE__ + '../../../../lib/packaging/utils.rb' )
+load File.expand_path( __FILE__ + '../../../../lib/packaging/build_instance.rb' )
 require 'yaml'
 
-describe Build::BuildInstance do
+describe Packaging::BuildInstance do
   Build_Params = [:apt_host,
                   :apt_repo_path,
                   :apt_repo_url,
@@ -100,7 +100,7 @@ describe Build::BuildInstance do
                   :yum_repo_path]
 
   before :each do
-    @build = Build::BuildInstance.new
+    @build = Packaging::BuildInstance.new
   end
 
   describe "#new" do
