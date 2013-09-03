@@ -5,7 +5,7 @@ namespace :package do
 
     FileList["#{workdir}/ext/**/*.erb"].exclude(/#{workdir}\/ext\/(packaging|osx)/).each do |template|
       # process the template, stripping off the ERB extension
-      erb(template, template[0..-5])
+      erb(template, template[0..-5], @build.binding)
       rm_f(template)
     end
   end

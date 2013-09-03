@@ -58,19 +58,19 @@ def make_directory_tree
   end
 
   if File.exists?('ext/osx/postflight.erb')
-    erb 'ext/osx/postflight.erb', "#{@working_tree["scripts"]}/postinstall"
+    erb 'ext/osx/postflight.erb', "#{@working_tree["scripts"]}/postinstall", @build.binding
   end
 
   if File.exists?('ext/osx/preflight.erb')
-    erb 'ext/osx/preflight.erb', "#{@working_tree["scripts"]}/preinstall"
+    erb 'ext/osx/preflight.erb', "#{@working_tree["scripts"]}/preinstall", @build.binding
   end
 
   if File.exists?('ext/osx/prototype.plist.erb')
-    erb 'ext/osx/prototype.plist.erb', "#{@scratch}/prototype.plist"
+    erb 'ext/osx/prototype.plist.erb', "#{@scratch}/prototype.plist" @build.binding
   end
 
   if File.exists?('ext/packaging/static_artifacts/PackageInfo.plist')
-    cp 'ext/packaging/static_artifacts/PackageInfo.plist', "#{@scratch}/PackageInfo.plist"
+    cp 'ext/packaging/static_artifacts/PackageInfo.plist', "#{@scratch}/PackageInfo.plist", @build.binding
   end
 
 end

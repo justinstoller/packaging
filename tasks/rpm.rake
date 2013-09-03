@@ -2,7 +2,7 @@ def prep_rpm_build_dir
   temp = get_temp
   mkdir_pr temp, "#{temp}/SOURCES", "#{temp}/SPECS"
   cp_pr FileList["pkg/#{@build.project}-#{@build.version}.tar.gz*"], "#{temp}/SOURCES"
-  erb "ext/redhat/#{@build.project}.spec.erb", "#{temp}/SPECS/#{@build.project}.spec"
+  erb "ext/redhat/#{@build.project}.spec.erb", "#{temp}/SPECS/#{@build.project}.spec", @build.binding
   temp
 end
 

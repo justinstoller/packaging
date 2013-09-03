@@ -1,5 +1,4 @@
 if @build_ips
-  require 'erb'
   namespace :package do
     namespace :ips do
       workdir = "pkg/ips/workdir"
@@ -27,7 +26,7 @@ if @build_ips
 
       # Process templates and write the initial manifest
       task :prototmpl do
-        erb("ext/ips/#{@build.project}.p5m.erb", workdir + '/' + @build.project + '.p5m.x')
+        erb("ext/ips/#{@build.project}.p5m.erb", workdir + '/' + @build.project + '.p5m.x', @build.binding)
       end
 
       # Update manifest to include the installation image information.

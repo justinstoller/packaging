@@ -27,14 +27,14 @@ module Packaging
       host == %x{hostname}.chomp! or fail "Requires host to be #{host}!"
     end
 
-    def erb_string(erbfile)
+    def erb_string(erbfile, context = binding)
       template  = File.read(erbfile)
       message   = ERB.new(template, nil, "-")
-      message.result(binding)
+      message.result( context )
     end
 
-    def erb(erbfile,  outfile)
-      output           = erb_string(erbfile)
+    def erb(erbfile,  outfile, context = binding)
+      output           = erb_string(erbfile, context)
       File.open(outfile, 'w') { |f| f.write output }
       puts "Generated: #{outfile}"
     end

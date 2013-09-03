@@ -35,7 +35,7 @@ namespace :pl do
       templates.each do |t|
         erb_file  = File.join(template_dir, t)
         xml_file = File.join(work_dir, t.gsub('.erb', ''))
-        erb(erb_file, xml_file)
+        erb(erb_file, xml_file, @build.binding)
         job_name  = "#{@build.project}-#{t.gsub('.xml.erb','')}-#{@build.build_date}-#{@build.ref}"
         puts "Checking for existence of #{job_name}..."
         if jenkins_job_exists?(job_name)

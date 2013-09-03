@@ -115,6 +115,10 @@ module Packaging
     end
     alias name project
 
+    def binding
+      binding
+    end
+
     ##
     # Take a hash of parameters, and iterate over them,
     # setting each build param to the corresponding hash key,value.
