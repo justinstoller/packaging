@@ -10,21 +10,11 @@ namespace :pl do
     unless ENV['PARAMS_FILE'] && ENV['PARAMS_FILE'] != ''
       tempdir = args.tempdir
       raise "pl:load_extras requires a directory containing extras data" if tempdir.nil?
-      @build.set_params_from_file("#{tempdir}/team/#{@build.builder_data_file}")
-      @build.set_params_from_file("#{tempdir}/project/#{@build.builder_data_file}")
-      # Overrideable
-      @build.build_pe   = boolean_value(ENV['PE_BUILD']) if ENV['PE_BUILD']
-      # right now, puppetdb is the only one to override these, because it needs
-      # two sets of cows, one for PE and the other for FOSS
-      @build.cows             = ENV['COW']      if ENV['COW']
-      @build.final_mocks      = ENV['MOCK']     if ENV['MOCK']
-      @build.packager         = ENV['PACKAGER'] if ENV['PACKAGER']
-      @build.pe_version       = ENV['PE_VER']   if ENV['PE_VER']
-      @build.yum_repo_path    = ENV['YUM_REPO'] if ENV['YUM_REPO']
-      @build.yum_host         = ENV['YUM_HOST'] if ENV['YUM_HOST']
-      @build.apt_host         = ENV['APT_HOST'] if ENV['APT_HOST']
-      @build.apt_repo_path    = ENV['APT_REPO'] if ENV['APT_REPO']
+
+      @build.load_extra_params_from( tempdir )
     end
+
+    # Warn that the user asked to do something and we're not going to....
   end
 end
 

@@ -180,6 +180,25 @@ module Packaging
       notify          = ENV['NOTIFY']                  if ENV['NOTIFY']
     end
 
+    def load_extra_params_from( location )
+      set_params_from_file("#{location}/team/#{builder_data_file}")
+      set_params_from_file("#{location}/project/#{builder_data_file}")
+
+      # Overrideable
+      build_pe   = boolean_value(ENV['PE_BUILD']) if ENV['PE_BUILD']
+
+      # right now, puppetdb is the only one to override these, because it needs
+      # two sets of cows, one for PE and the other for FOSS
+      cows             = ENV['COW']      if ENV['COW']
+      final_mocks      = ENV['MOCK']     if ENV['MOCK']
+      packager         = ENV['PACKAGER'] if ENV['PACKAGER']
+      pe_version       = ENV['PE_VER']   if ENV['PE_VER']
+      yum_repo_path    = ENV['YUM_REPO'] if ENV['YUM_REPO']
+      yum_host         = ENV['YUM_HOST'] if ENV['YUM_HOST']
+      apt_host         = ENV['APT_HOST'] if ENV['APT_HOST']
+      apt_repo_path    = ENV['APT_REPO'] if ENV['APT_REPO']
+    end
+
     ##
     # Write all build parameters to a yaml file in a temporary location. Print
     # the path to the file and return it as a string. Accept an argument for
