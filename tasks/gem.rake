@@ -1,29 +1,6 @@
 if @build.build_gem
   require 'rubygems/package_task'
 
-  def glob_gem_files
-    gem_files = []
-    gem_excludes_file_list = []
-    gem_excludes_raw = @build.gem_excludes.nil? ? [] : @build.gem_excludes.split(' ')
-    gem_excludes_raw << 'ext/packaging'
-    gem_excludes_raw.each do |exclude|
-      if File.directory?(exclude)
-        gem_excludes_file_list += FileList["#{exclude}/**/*"]
-      else
-        gem_excludes_file_list << exclude
-      end
-    end
-    files = FileList[@build.gem_files.split(' ')]
-    files.each do |file|
-      if File.directory?(file)
-        gem_files += FileList["#{file}/**/*"]
-      else
-        gem_files << file
-      end
-    end
-    gem_files = gem_files - gem_excludes_file_list
-  end
-
   spec = Gem::Specification.new do |s|
     s.name = @build.project                                     unless @build.project.nil?
     s.name = @build.gem_name                                    unless @build.gem_name.nil?

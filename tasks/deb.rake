@@ -1,32 +1,3 @@
-def pdebuild args
-  results_dir = args[:work_dir]
-  cow         = args[:cow]
-  set_cow_envs(cow)
-  update_cow(cow)
-  sh "pdebuild  --configfile #{@build.pbuild_conf} \
-                --buildresult #{results_dir} \
-                --pbuilder cowbuilder -- \
-                --basepath /var/cache/pbuilder/#{cow}/"
-  $?.success? or fail "Failed to build deb with #{cow}!"
-end
-
-def update_cow(cow)
-  ENV['PATH'] = "/usr/sbin:#{ENV['PATH']}"
-  set_cow_envs(cow)
-  retry_on_fail(:times => 3) do
-    sh "sudo -E /usr/sbin/cowbuilder --update --override-config --configfile #{@build.pbuild_conf} --basepath /var/cache/pbuilder/#{cow} --distribution #{ENV['DIST']} --architecture #{ENV['ARCH']}"
-  end
-end
-
-def debuild args
-  results_dir = args[:work_dir]
-  begin
-    sh "debuild --no-lintian -uc -us"
-  rescue
-    fail "Something went wrong. Hopefully the backscroll or #{results_dir}/#{@build.project}_#{@build.debversion}.build file has a clue."
-  end
-end
-
 task :prep_deb_tars, :work_dir do |t,args|
   work_dir = args.work_dir
   cp_p "pkg/#{@build.project}-#{@build.version}.tar.gz", work_dir

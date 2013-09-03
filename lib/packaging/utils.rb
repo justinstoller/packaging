@@ -1,6 +1,672 @@
 module Packaging
   module Utils
 
+    #######################################################
+    #######################################################
+    #  Begin Metrics section ( tasks/30_metrics.rake )
+    #######################################################
+    #######################################################
+    @metrics          = []
+    @pg_major_version = nil
+    @db_table         = 'metrics'
+
+    def add_metrics args
+      @metrics << {
+        :bench      => args[:bench],
+        :dist       => ( args[:dist]        || ENV['DIST']       ),
+        :pkg        => ( args[:pkg]         || @build.project    ),
+        :version    => ( args[:version]     || @build.version    ),
+        :pe_version => ( args[:pe_version]  || @build.pe_version ),
+        :date       => ( args[:date]        || timestamp         ),
+        :who        => ( args[:who]         || ENV['USER']       ),
+        :where      => ( args[:where]       || hostname          )
+      }
+    end
+
+    def post_metrics
+      if psql = find_tool('psql')
+        ENV["PGCONNECT_TIMEOUT"]="10"
+
+        @metrics.each do |metric|
+          date        = metric[:date]
+          pkg         = metric[:pkg]
+          dist        = metric[:dist]
+          bench       = metric[:bench]
+          who         = metric[:who]
+          where       = metric[:where]
+          version     = metric[:version]
+          pe_version  = metric[:pe_version]
+          @pg_major_version ||= %x{/usr/bin/psql --version}.match(/psql \(PostgreSQL\) (\d)\..*/)[1].to_i
+          no_pass_fail = "-w" if @pg_major_version > 8
+          %x{#{psql} #{no_pass_fail} -c "INSERT INTO #{@db_table} \
+          (date, package, dist, build_time, build_user, build_loc, version, pe_version) \
+          VALUES ('#{date}', '#{pkg}', '#{dist}', #{bench}, '#{who}', '#{where}', '#{version}', '#{pe_version}')"}
+        end
+        @metrics = []
+      end
+    end
+
+    #######################################################
+    #######################################################
+    #  Begin Apple section ( tasks/apple.rake )
+    #######################################################
+    #######################################################
+
+    # method:       make_directory_tree
+    # description:  This method sets up the directory structure that packagemaker
+    #               needs to build a package. A prototype.plist file (holding
+    #               package-specific options) is built from an ERB template located
+    #               in the ext/osx directory.
+    def make_directory_tree
+      project_tmp    = "#{get_temp}/#{@package_name}"
+      @scratch       = "#{project_tmp}/#{@title}"
+      @working_tree  = {
+         'scripts'   => "#{@scratch}/scripts",
+         'resources' => "#{@scratch}/resources",
+         'working'   => "#{@scratch}/root",
+         'payload'   => "#{@scratch}/payload",
+      }
+      puts "Cleaning Tree: #{project_tmp}"
+      rm_rf(project_tmp)
+      @working_tree.each do |key,val|
+        mkdir_p(val)
+      end
+
+      if File.exists?('ext/osx/postflight.erb')
+        erb 'ext/osx/postflight.erb', "#{@working_tree["scripts"]}/postinstall", @build.binding
+      end
+
+      if File.exists?('ext/osx/preflight.erb')
+        erb 'ext/osx/preflight.erb', "#{@working_tree["scripts"]}/preinstall", @build.binding
+      end
+
+      if File.exists?('ext/osx/prototype.plist.erb')
+        erb 'ext/osx/prototype.plist.erb', "#{@scratch}/prototype.plist", @build.binding
+      end
+
+      if File.exists?('ext/packaging/static_artifacts/PackageInfo.plist')
+        cp 'ext/packaging/static_artifacts/PackageInfo.plist', "#{@scratch}/PackageInfo.plist", @build.binding
+      end
+
+    end
+
+    # method:        build_dmg
+    # description:   This method builds a package from the directory structure in
+    #                /tmp/#{@project} and puts it in the
+    #                /tmp/#{@project}/#{@project}-#{version}/payload directory. A DMG is
+    #                created, using hdiutil, based on the contents of the
+    #                /tmp/#{@project}/#{@project}-#{version}/payload directory. The resultant
+    #                DMG is placed in the pkg/apple directory.
+    #
+    def build_dmg
+      # Local Variables
+      dmg_format_code   = 'UDZO'
+      zlib_level        = '9'
+      dmg_format_option = "-imagekey zlib-level=#{zlib_level}"
+      dmg_format        = "#{dmg_format_code} #{dmg_format_option}"
+      dmg_file          = "#{@title}.dmg"
+      package_file      = "#{@title}.pkg"
+
+      # Build .pkg file
+      system("sudo #{PKGBUILD} --root #{@working_tree['working']} \
+        --scripts #{@working_tree['scripts']} \
+        --identifier #{@reverse_domain} \
+        --version #{@version} \
+        --install-location / \
+        --ownership preserve \
+        --info #{@scratch}/PackageInfo.plist \
+        #{@working_tree['payload']}/#{package_file}")
+
+      # Build .dmg file
+      system("sudo hdiutil create -volname #{@title} \
+        -srcfolder #{@working_tree['payload']} \
+        -uid 99 \
+        -gid 99 \
+        -ov \
+        -format #{dmg_format} \
+        #{dmg_file}")
+
+      if File.directory?("#{pwd}/pkg/apple")
+        sh "sudo mv #{pwd}/#{dmg_file} #{pwd}/pkg/apple/#{dmg_file}"
+        puts "moved:   #{dmg_file} has been moved to #{pwd}/pkg/apple/#{dmg_file}"
+      else
+        mkdir_p("#{pwd}/pkg/apple")
+        sh "sudo mv #{pwd}/#{dmg_file} #{pwd}/pkg/apple/#{dmg_file}"
+        puts "moved:   #{dmg_file} has been moved to #{pwd}/pkg/apple/#{dmg_file}"
+      end
+    end
+
+    # method:        pack_source
+    # description:   This method copies the #{@project} source into a directory
+    #                structure in /tmp/#{@project}/#{@project}-#{version}/root mirroring the
+    #                structure on the target system for which the package will be
+    #                installed. Anything installed into /tmp/#{@project}/root will be
+    #                installed as the package's payload.
+    #
+    def pack_source
+      work          = "#{@working_tree['working']}"
+      source = pwd
+
+      # Make all necessary directories
+      @source_files.each_value do |files|
+        files.each_value do |params|
+          mkdir_p "#{work}/#{params['path']}"
+        end
+      end
+
+      # Install directory contents into place
+      unless @source_files['directories'].nil?
+        @source_files['directories'].each do |dir, params|
+          unless FileList["#{source}/#{dir}/*"].empty?
+            cmd = "#{DITTO} #{source}/#{dir}/ #{work}/#{params['path']}"
+            puts cmd
+            system(cmd)
+          end
+        end
+      end
+
+      # Setup a preinstall script and replace variables in the files with
+      # the correct paths.
+      if File.exists?("#{@working_tree['scripts']}/preinstall")
+        chmod(0755, "#{@working_tree['scripts']}/preinstall")
+        sh "sudo chown root:wheel #{@working_tree['scripts']}/preinstall"
+      end
+
+      # Setup a postinstall from from the erb created earlier
+      if File.exists?("#{@working_tree['scripts']}/postinstall")
+        chmod(0755, "#{@working_tree['scripts']}/postinstall")
+        sh "sudo chown root:wheel #{@working_tree['scripts']}/postinstall"
+      end
+
+      # Do a run through first setting the specified permissions then
+      # making sure 755 is set for all directories
+      unless @source_files['directories'].nil?
+        @source_files['directories'].each do |dir, params|
+          owner = params['owner']
+          group = params['group']
+          perms = params['perms']
+          path  = params['path']
+          ##
+          # Before setting our default permissions for all subdirectories/files of
+          # each directory listed in directories, we have to get a list of the
+          # directories. Otherwise, when we set the default perms (most likely
+          # 0644) we'll lose traversal on subdirectories, and later when we want to
+          # ensure they're 755 we won't be able to find them.
+          #
+          directories = []
+          Dir["#{work}/#{path}/**/*"].each do |file|
+            directories << file if File.directory?(file)
+          end
+
+          ##
+          # Here we're setting the default permissions for all files as described
+          # in file_mapping.yaml. Since we have a listing of directories, it
+          # doesn't matter if we remove executable permission on directories, we'll
+          # reset it later.
+          #
+          sh "sudo chmod -R #{perms} #{work}/#{path}"
+
+          ##
+          # We know at least one directory, the one listed in file_mapping.yaml, so
+          # we set it executable.
+          #
+          sh "sudo chmod 0755 #{work}/#{path}"
+
+          ##
+          # Now that default perms are set, we go in and reset executable perms on
+          # directories
+          #
+          directories.each { |d| sh "sudo chmod 0755 #{d}" }
+
+          ##
+          # Finally we set the owner/group as described in file_mapping.yaml
+          #
+          sh "sudo chown -R #{owner}:#{group} #{work}/#{path}"
+        end
+      end
+
+      # Install any files
+      unless @source_files['files'].nil?
+        @source_files['files'].each do |file, params|
+          owner = params['owner']
+          group = params['group']
+          perms = params['perms']
+          dest  = params['path']
+          # Allow for regexs like [A-Z]*
+          FileList[file].each do |f|
+            cmd = "sudo #{INSTALL} -o #{owner} -g #{group} -m #{perms} #{source}/#{f} #{work}/#{dest}"
+            puts cmd
+            system(cmd)
+          end
+        end
+      end
+    end
+
+
+    #######################################################
+    #######################################################
+    #  Begin Deb section ( tasks/deb.rake )
+    #######################################################
+    #######################################################
+
+    def pdebuild args
+      results_dir = args[:work_dir]
+      cow         = args[:cow]
+      set_cow_envs(cow)
+      update_cow(cow)
+      sh "pdebuild  --configfile #{@build.pbuild_conf} \
+                    --buildresult #{results_dir} \
+                    --pbuilder cowbuilder -- \
+                    --basepath /var/cache/pbuilder/#{cow}/"
+      $?.success? or fail "Failed to build deb with #{cow}!"
+    end
+
+    def update_cow(cow)
+      ENV['PATH'] = "/usr/sbin:#{ENV['PATH']}"
+      set_cow_envs(cow)
+      retry_on_fail(:times => 3) do
+        sh "sudo -E /usr/sbin/cowbuilder --update --override-config --configfile #{@build.pbuild_conf} --basepath /var/cache/pbuilder/#{cow} --distribution #{ENV['DIST']} --architecture #{ENV['ARCH']}"
+      end
+    end
+
+    def debuild args
+      results_dir = args[:work_dir]
+      begin
+        sh "debuild --no-lintian -uc -us"
+      rescue
+        fail "Something went wrong. Hopefully the backscroll or #{results_dir}/#{@build.project}_#{@build.debversion}.build file has a clue."
+      end
+    end
+
+
+    #######################################################
+    #######################################################
+    #  Begin Gem section ( tasks/gem.rake )
+    #######################################################
+    #######################################################
+
+    def glob_gem_files
+      gem_files = []
+      gem_excludes_file_list = []
+      gem_excludes_raw = @build.gem_excludes.nil? ? [] : @build.gem_excludes.split(' ')
+      gem_excludes_raw << 'ext/packaging'
+      gem_excludes_raw.each do |exclude|
+        if File.directory?(exclude)
+          gem_excludes_file_list += FileList["#{exclude}/**/*"]
+        else
+          gem_excludes_file_list << exclude
+        end
+      end
+      files = FileList[@build.gem_files.split(' ')]
+      files.each do |file|
+        if File.directory?(file)
+          gem_files += FileList["#{file}/**/*"]
+        else
+          gem_files << file
+        end
+      end
+      gem_files = gem_files - gem_excludes_file_list
+    end
+
+
+    #######################################################
+    #######################################################
+    #  Begin Mock section ( tasks/mock.rake )
+    #######################################################
+    #######################################################
+
+    # The mock methods/tasks are fairly specific to puppetlabs infrastructure, e.g., the mock configs
+    # have to be named in a format like the PL mocks, e.g. dist-version-architecture, such as:
+    # el-5-i386
+    # fedora-17-i386
+    # as well as the oddly formatted exception, 'pl-5-i386' which is the default puppetlabs FOSS mock
+    # format for 'el-5-i386' (note swap 'pl' for 'el')
+    #
+    # The mock-built rpms are placed in a directory structure under 'pkg' based on how the Puppet Labs
+    # repo structure is laid out in order to facilitate easy shipping from the local repository to the
+    # Puppet Labs repos. For open source, the directory structure mirrors that of yum.puppetlabs.com:
+    # pkg/<dist>/<version>/{products,devel,dependencies}/<arch>/*.rpm
+    # e.g.,
+    # pkg/el/5/products/i386/*.rpm
+    # pkg/fedora/f16/products/i386/*.rpm
+    #
+    # For PE, the directory structure is flatter:
+    # pkg/<dist>-<version>-<arch>/*.rpm
+    # e.g.,
+    # pkg/el-5-i386/*.rpm
+    def mock_artifact(mock_config, cmd_args)
+      unless mock = find_tool('mock')
+        raise "mock is required for building srpms with mock. Please install mock and try again."
+      end
+      randomize = @build.random_mockroot
+      configdir = nil
+      basedir = File.join('var', 'lib', 'mock')
+
+      if randomize
+        basedir, configdir = randomize_mock_config_dir(mock_config)
+        configdir_arg = " --configdir #{configdir}"
+      end
+
+      sh "#{mock} -r #{mock_config} #{configdir_arg} #{cmd_args}"
+      # Clean up the configdir
+      rm_r configdir unless configdir.nil?
+
+      # Return a FileList of the build artifacts
+      FileList[File.join(basedir, mock_config, 'result','*.rpm')]
+    end
+
+    # Use mock to build an SRPM
+    # Return the path to the srpm
+    def mock_srpm(mock_config, spec, sources, defines=nil)
+      cmd_args = "--buildsrpm #{defines} --sources #{sources} --spec #{spec}"
+      srpms = mock_artifact(mock_config, cmd_args)
+
+      unless srpms.size == 1
+        fail "#{srpms} contains an unexpected number of artifacts."
+      end
+      srpms[0]
+    end
+
+    # Use mock to build rpms from an srpm
+    # Return a FileList containing the built RPMs
+    def mock_rpm(mock_config, srpm)
+      cmd_args = " #{srpm}"
+      mock_artifact(mock_config, cmd_args)
+    end
+
+    # Determine the "family" of the target distribution based on the mock config name,
+    # e.g. pupent-3.0-el5-i386 = "el"
+    # and  pl-fedora-17-i386 = "fedora"
+    #
+    def mock_el_family(mock_config)
+      if @build.build_pe
+        family = mock_config.split('-')[2][/[a-z]+/]
+      else
+        first, second = mock_config.split('-')
+        if (first == 'el' || first == 'fedora')
+          family = first
+        elsif first == 'pl'
+          if second.match(/^\d+$/)
+            family = 'el'
+          else
+            family = second
+          end
+        end
+      end
+      family
+    end
+
+    # Determine the major version of the target distribution based on the mock config name,
+    # e.g. pupent-3.0-el5-i386 = "5"
+    # and "pl-fedora-17-i386" = "17"
+    #
+    def mock_el_ver(mock_config)
+      if @build.build_pe
+        version = mock_config.split('-')[2][/[0-9]+/]
+      else
+        first, second, third = mock_config.split('-')
+        if (first == 'el' || first == 'fedora') || (first == 'pl' && second.match(/^\d+$/))
+          version = second
+        else
+          version = third
+        end
+      end
+      if [first,second].include?('fedora')
+        version = "f#{version}"
+      end
+      version
+    end
+
+    # Determine the appropriate rpm macro definitions based on the mock config name
+    # Return a string of space separated macros prefixed with --define
+    #
+    def mock_defines(mock_config)
+      family = mock_el_family(mock_config)
+      version = mock_el_ver(mock_config)
+      defines = ""
+      if version =~ /^(4|5)$/ or family == "sles"
+        defines = %Q{--define "%dist .#{family}#{version}" \
+          --define "_source_filedigest_algorithm 1" \
+          --define "_binary_filedigest_algorithm 1" \
+          --define "_binary_payload w9.gzdio" \
+          --define "_source_payload w9.gzdio" \
+          --define "_default_patch_fuzz 2"}
+      end
+      defines
+    end
+
+    def build_rpm_with_mock(mocks)
+      mocks.split(' ').each do |mock_config|
+        family  = mock_el_family(mock_config)
+        version = mock_el_ver(mock_config)
+        subdir  = @build.is_rc? ? 'devel' : 'products'
+        bench = Benchmark.realtime do
+          # Set up the rpmbuild dir in a temp space, with our tarball and spec
+          workdir = prep_rpm_build_dir
+          spec = Dir.glob(File.join(workdir, "SPECS", "*.spec"))[0]
+          sources = File.join(workdir, "SOURCES")
+          defines = mock_defines(mock_config)
+
+          # Build the srpm inside a mock chroot
+          srpm = mock_srpm(mock_config, spec, sources, defines)
+
+          # Now that we have the srpm, build the rpm in a mock chroot
+          rpms = mock_rpm(mock_config, srpm)
+
+          rpms.each do |rpm|
+            rpm.strip!
+            unless ENV['RC_OVERRIDE'] == '1'
+              if @build.is_rc? == FALSE and rpm =~ /[0-9]+rc[0-9]+\./
+                puts "It looks like you might be trying to ship an RC to the production repos. Leaving #{rpm}. Pass RC_OVERRIDE=1 to override."
+                next
+              elsif @build.is_rc? and rpm !~ /[0-9]+rc[0-9]+\./
+                puts "It looks like you might be trying to ship a production release to the development repos. Leaving #{rpm}. Pass RC_OVERRIDE=1 to override."
+                next
+              end
+            end
+
+            if @build.build_pe
+              %x{mkdir -p pkg/pe/rpm/#{family}-#{version}-{srpms,i386,x86_64}}
+              case File.basename(rpm)
+                when /debuginfo/
+                  rm_rf(rpm)
+                when /src\.rpm/
+                  cp_pr(rpm, "pkg/pe/rpm/#{family}-#{version}-srpms")
+                when /i.?86/
+                  cp_pr(rpm, "pkg/pe/rpm/#{family}-#{version}-i386")
+                when /x86_64/
+                  cp_pr(rpm, "pkg/pe/rpm/#{family}-#{version}-x86_64")
+                when /noarch/
+                  cp_pr(rpm, "pkg/pe/rpm/#{family}-#{version}-i386")
+                  ln("pkg/pe/rpm/#{family}-#{version}-i386/#{File.basename(rpm)}", "pkg/pe/rpm/#{family}-#{version}-x86_64/")
+              end
+            else
+              %x{mkdir -p pkg/#{family}/#{version}/#{subdir}/{SRPMS,i386,x86_64}}
+              case File.basename(rpm)
+                when /debuginfo/
+                  rm_rf(rpm)
+                when /src\.rpm/
+                  cp_pr(rpm, "pkg/#{family}/#{version}/#{subdir}/SRPMS")
+                when /i.?86/
+                  cp_pr(rpm, "pkg/#{family}/#{version}/#{subdir}/i386")
+                when /x86_64/
+                  cp_pr(rpm, "pkg/#{family}/#{version}/#{subdir}/x86_64")
+                when /noarch/
+                  cp_pr(rpm, "pkg/#{family}/#{version}/#{subdir}/i386")
+                  ln("pkg/#{family}/#{version}/#{subdir}/i386/#{File.basename(rpm)}", "pkg/#{family}/#{version}/#{subdir}/x86_64/")
+              end
+            end
+          end
+          # To avoid filling up the system with our random mockroots, we should
+          # clean up. However, this requires sudo. If we don't have sudo, we'll
+          # just fail and not clean up, but warn the user about it.
+          if @build.random_mockroot
+            %x{sudo -n echo 'Cleaning build root.'}
+            if $?.success?
+              sh "sudo -n rm -r #{File.dirname(srpm)}" unless File.dirname(srpm).nil?
+              sh "sudo -n rm -r #{File.dirname(rpms[0])}" unless File.dirname(rpms[0]).nil?
+              sh "sudo -n rm -r #{workdir}" unless workdir.nil?
+            else
+              warn "Couldn't clean rpm build areas without sudo. Leaving."
+            end
+          end
+        end
+        add_metrics({ :dist => "#{family}-#{version}", :bench => bench }) if @build.benchmark
+        puts "Finished building in: #{bench}"
+      end
+    end
+
+    # With the advent of using Jenkins to parallelize builds, it becomes critical
+    # that we be able to use the same mock at the same time for > 1 builds without
+    # clobbering the mock root every time. Here we add a method that takes the full
+    # path to a mock configuration and a path, and adds a base directory
+    # configuration directive to the mock to use the path as the directory for the
+    # mock build root. The new mock config is written to a temporary space, and its
+    # location is returned.  This allows us to create mock configs with randomized
+    # temporary mock roots.
+    #
+    def mock_with_basedir(mock, basedir)
+      config = IO.readlines(mock)
+      basedir = "config_opts['basedir'] = '#{basedir}'"
+      config.unshift(basedir)
+      tempdir = get_temp
+      newmock = File.join(tempdir, File.basename(mock))
+      File.open(newmock, 'w') { |f| f.puts config }
+      newmock
+    end
+
+    # Mock accepts an alternate configuration directory to /etc/mock for mock
+    # configs, but the directory has to include both site-defaults.cfg and
+    # logging.ini. This is a simple utility method to set a mock configuration dir
+    # by copying a mock and the required defaults to a temporary directory and
+    # returning that directory. This method takes the full path to a mock
+    # configuration file and returns the path to the new configuration dir.
+    #
+    def setup_mock_config_dir(mock)
+      tempdir = get_temp
+      cp File.join('/', 'etc', 'mock', 'site-defaults.cfg'), tempdir
+      cp File.join('/', 'etc', 'mock', 'logging.ini'), tempdir
+      cp mock, tempdir
+      tempdir
+    end
+
+    # Create a mock config file from an existing one, except insert the 'basedir'
+    # option. 'basedir' will be set to a random directory we create. Move the new
+    # mock config and the required default mock settings files into a new config
+    # dir to pass to mock. Return the path to the config dir.
+    #
+    def randomize_mock_config_dir(mock_config)
+      # basedir will be the location of our temporary mock root
+      basedir = get_temp
+      chown("#{ENV['USER']}", "mock", basedir)
+      # Mock requires the sticky bit be set on the basedir
+      chmod(02775, basedir)
+      mockfile = File.join('/', 'etc', 'mock', "#{mock_config}.cfg")
+      puts "Setting mock basedir to #{basedir}"
+      # Create a new mock config file with 'basedir' set to our basedir
+      config = mock_with_basedir(mockfile, basedir)
+      # Setup a mock config dir, copying in our mock config and logging.ini etc
+      configdir = setup_mock_config_dir(config)
+      # Clean up the directory with the temporary mock config
+      rm_r File.dirname(config)
+      return basedir, configdir
+    end
+
+
+    #######################################################
+    #######################################################
+    #  Begin PRM section ( tasks/rpm.rake )
+    #######################################################
+    #######################################################
+
+    def prep_rpm_build_dir
+      temp = get_temp
+      mkdir_pr temp, "#{temp}/SOURCES", "#{temp}/SPECS"
+      cp_pr FileList["pkg/#{@build.project}-#{@build.version}.tar.gz*"], "#{temp}/SOURCES"
+      erb "ext/redhat/#{@build.project}.spec.erb", "#{temp}/SPECS/#{@build.project}.spec", @build.binding
+      temp
+    end
+
+    def build_rpm(buildarg = "-bs")
+      check_tool('rpmbuild')
+      workdir = prep_rpm_build_dir
+      if dist = el_version
+        if dist.to_i < 6
+          dist_string = "--define \"%dist .el#{dist}"
+        end
+      end
+      rpm_define = "#{dist_string} --define \"%_topdir  #{workdir}\" "
+      rpm_old_version = '--define "_source_filedigest_algorithm 1" --define "_binary_filedigest_algorithm 1" \
+         --define "_binary_payload w9.gzdio" --define "_source_payload w9.gzdio" \
+         --define "_default_patch_fuzz 2"'
+      args = rpm_define + ' ' + rpm_old_version
+      mkdir_pr 'pkg/srpm'
+      if buildarg == '-ba'
+        mkdir_p 'pkg/rpm'
+      end
+      if @build.sign_tar
+        Rake::Task["pl:sign_tar"].invoke
+      end
+      sh "rpmbuild #{args} #{buildarg} --nodeps #{workdir}/SPECS/#{@build.project}.spec"
+      mv FileList["#{workdir}/SRPMS/*.rpm"], "pkg/srpm"
+      if buildarg == '-ba'
+        mv FileList["#{workdir}/RPMS/*/*.rpm"], "pkg/rpm"
+      end
+      rm_rf workdir
+      puts
+      output = FileList['pkg/*/*.rpm']
+      puts "Wrote:"
+      output.each do | line |
+        puts line
+      end
+    end
+
+
+    #######################################################
+    #######################################################
+    #  Begin Signing section ( tasks/sign.rake )
+    #######################################################
+    #######################################################
+
+    def sign_el5(rpm)
+      # Try this up to 5 times, to allow for incorrect passwords
+      retry_on_fail(:times => 5) do
+        sh "rpm --define '%_gpg_name #{@build.gpg_name}' --define '%__gpg_sign_cmd %{__gpg} gpg --force-v3-sigs --digest-algo=sha1 --batch --no-verbose --no-armor --passphrase-fd 3 --no-secmem-warning -u %{_gpg_name} -sbo %{__signature_filename} %{__plaintext_filename}' --addsign #{rpm} > /dev/null"
+      end
+    end
+
+    def sign_modern(rpm)
+      retry_on_fail(:times => 5) do
+        sh "rpm --define '%_gpg_name #{@build.gpg_name}' --addsign #{rpm} > /dev/null"
+      end
+    end
+
+    def rpm_has_sig(rpm)
+      %x{rpm -Kv #{rpm} | grep "#{@build.gpg_key.downcase}" &> /dev/null}
+      $?.success?
+    end
+
+    def sign_deb_changes(file)
+      %x{debsign --re-sign -k#{@build.gpg_key} #{file}}
+    end
+
+    # requires atleast a self signed prvate key and certificate pair
+    # fmri is the full IPS package name with version, e.g.
+    # facter@facter@1.6.15,5.11-0:20121112T042120Z
+    # technically this can be any ips-compliant package identifier, e.g. application/facter
+    # repo_uri is the path to the repo currently containing the package
+    def sign_ips(fmri, repo_uri)
+      %x{pkgsign -s #{repo_uri}  -k #{@build.privatekey_pem} -c #{@build.certificate_pem} -i #{@build.ips_inter_cert} #{fmri}}
+    end
+
+
+    #######################################################
+    #######################################################
+    #  Begin Signing section ( tasks/sign.rake )
+    #######################################################
+    #######################################################
+
+
     def check_tool(tool)
       return true if has_tool(tool)
       fail "#{tool} tool not found...exiting"
