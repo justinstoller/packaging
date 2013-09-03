@@ -99,6 +99,80 @@ Build_Params = [
   :yum_repo_path
 ]
 
+TestVersions = {
+  '0.7.0' => {
+    :git_version  => %w{0.7.0},
+    :dash_version => '0.7.0',
+    :ips_version  => '0.7.0,3.14159-0',
+    :dot_version  => '0.7.0',
+    :deb_version  => '0.7.0-1puppetlabs1',
+    :rpm_version  => '0.7.0',
+    :rpm_release  => '1',
+    :is_rc?       =>  false,
+  },
+  '0.7.0rc10' => {
+    :git_version  =>   %w{0.7.0rc10},
+    :dash_version => '0.7.0rc10',
+    :ips_version  => '0.7.0rc10,3.14159-0',
+    :dot_version  => '0.7.0rc10',
+    :deb_version  => '0.7.0-0.1rc10puppetlabs1',
+    :rpm_version  => '0.7.0',
+    :rpm_release  => '0.1rc10',
+    :is_rc?       =>  true,
+  },
+  '0.7.0-rc1' => {
+    :git_version  => %w{0.7.0 rc1},
+    :dash_version => '0.7.0-rc1',
+    :ips_version  => '0.7.0,3.14159-0',
+    :dot_version  => '0.7.0.rc1',
+    :deb_version  => '0.7.0-0.1rc1puppetlabs1',
+    :rpm_version  => '0.7.0',
+    :rpm_release  => '0.1rc1',
+    :is_rc?       =>  true,
+  },
+  '0.7.0-rc1-63-ge391f55' => {
+    :git_version  => %w{0.7.0 rc1 63},
+    :dash_version => '0.7.0-rc1-63',
+    :ips_version  => '0.7.0,3.14159-63',
+    :dot_version  => '0.7.0.rc1.63',
+    :deb_version  => '0.7.0-0.1rc1.63puppetlabs1',
+    :rpm_version  => '0.7.0',
+    :rpm_release  => '0.1rc1.63',
+    :is_rc?       =>  true,
+  },
+  '0.7.0-rc1-63-ge391f55-dirty' => {
+    :git_version  => %w{0.7.0 rc1 63 dirty},
+    :dash_version => '0.7.0-rc1-63-dirty',
+    :ips_version  => '0.7.0,3.14159-63-dirty',
+    :dot_version  => '0.7.0.rc1.63.dirty',
+    :deb_version  => '0.7.0-0.1rc1.63dirtypuppetlabs1',
+    :rpm_version  => '0.7.0',
+    :rpm_release  => '0.1rc1.63dirty',
+    :is_rc?       =>  true,
+
+  },
+  '0.7.0-63-ge391f55' => {
+    :git_version  => %w{0.7.0 63},
+    :dash_version => '0.7.0-63',
+    :ips_version  => '0.7.0,3.14159-63',
+    :dot_version  => '0.7.0.63',
+    :deb_version  => '0.7.0.63-1puppetlabs1',
+    :rpm_version  => '0.7.0.63',
+    :rpm_release  => '1',
+    :is_rc?       =>  false,
+
+  },
+  '0.7.0-63-ge391f55-dirty' => {
+    :git_version  => %w{0.7.0 63 dirty},
+    :dash_version => '0.7.0-63-dirty',
+    :ips_version  => '0.7.0,3.14159-63-dirty',
+    :dot_version  => '0.7.0.63.dirty',
+    :deb_version  => '0.7.0.63.dirty-1puppetlabs1',
+    :rpm_version  => '0.7.0.63.dirty',
+    :rpm_release  => '1',
+    :is_rc?       =>  false,
+  },
+}
 describe Packaging::BuildInstance do
 
   before :each do
@@ -173,6 +247,35 @@ describe Packaging::BuildInstance do
       YAML.should_receive(:load_file).with(file)
       expect { YAML.load_file(file) }.to_not raise_error
       @build.params_to_yaml
+    end
+  end
+
+  TestVersions.keys.sort.each do |input|
+    describe "Versioning based on #{input}" do
+
+      results = TestVersions[input]
+      results.keys.sort_by(&:to_s).each do |method|
+
+        it "using #{method} #{input.inspect} becomes #{results[method].inspect}" do
+          @build.release = "1"
+
+          if method.to_s.include?("deb")
+            @build.should_receive(:git_describe_internal).and_return(input)
+            @build.packager = "puppetlabs"
+
+          elsif method.to_s.include?("rpm")
+            @build.should_receive(:git_describe_internal).and_return(input)
+
+          else
+            @build.stub(:uname_r) { "3.14159" }
+            @build.stub(:is_git_repo) { true }
+            @build.should_receive(:git_describe_internal).and_return(input)
+
+          end
+
+          @build.send(method).should == results[method]
+        end
+      end
     end
   end
 end

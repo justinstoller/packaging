@@ -17,7 +17,7 @@ load File.expand_path('../build.rake', __FILE__)
 # Create our BuildInstance object, which will contain all the data about our
 # proposed build
 #
-@build = Build::BuildInstance.new
+@build = Packaging::BuildInstance.new
 
 if ENV['PARAMS_FILE'] && ENV['PARAMS_FILE'] != ''
   @build.set_params_from_file(ENV['PARAMS_FILE'])
@@ -28,54 +28,7 @@ else
   @build.set_params_from_file('ext/build_defaults.yaml') if File.readable?('ext/build_defaults.yaml')
 end
 
-# Allow environment variables to override the settings we just read in. These
-# variables are called out specifically because they are likely to require
-# overriding in at least some cases.
-#
-@build.sign_tar        = boolean_value(ENV['SIGN_TAR']) if ENV['SIGN_TAR']
-@build.build_gem       = boolean_value(ENV['GEM'])      if ENV['GEM']
-@build.build_dmg       = boolean_value(ENV['DMG'])      if ENV['DMG']
-@build.build_ips       = boolean_value(ENV['IPS'])      if ENV['IPS']
-@build.build_doc       = boolean_value(ENV['DOC'])      if ENV['DOC']
-@build.build_pe        = boolean_value(ENV['PE_BUILD']) if ENV['PE_BUILD']
-@build.debug           = boolean_value(ENV['DEBUG'])    if ENV['DEBUG']
-@build.default_cow     = ENV['COW']                     if ENV['COW']
-@build.cows            = ENV['COW']                     if ENV['COW']
-@build.pbuild_conf     = ENV['PBUILDCONF']              if ENV['PBUILDCONF']
-@build.packager        = ENV['PACKAGER']                if ENV['PACKAGER']
-@build.default_mock    = ENV['MOCK']                    if ENV['MOCK']
-@build.final_mocks     = ENV['MOCK']                    if ENV['MOCK']
-@build.rc_mocks        = ENV['MOCK']                    if ENV['MOCK']
-@build.gpg_name        = ENV['GPG_NAME']                if ENV['GPG_NAME']
-@build.gpg_key         = ENV['GPG_KEY']                 if ENV['GPG_KEY']
-@build.certificate_pem = ENV['CERT_PEM']                if ENV['CERT_PEM']
-@build.privatekey_pem  = ENV['PRIVATE_PEM']             if ENV['PRIVATE_PEM']
-@build.yum_host        = ENV['YUM_HOST']                if ENV['YUM_HOST']
-@build.yum_repo_path   = ENV['YUM_REPO']                if ENV['YUM_REPO']
-@build.apt_host        = ENV['APT_HOST']                if ENV['APT_HOST']
-@build.apt_repo_path   = ENV['APT_REPO']                if ENV['APT_REPO']
-@build.pe_version      = ENV['PE_VER']                  if ENV['PE_VER']
-@build.notify          = ENV['NOTIFY']                  if ENV['NOTIFY']
-
-##
-# These parameters are either generated dynamically by the project, or aren't
-# sufficiently generic/multi-purpose enough to justify being in
-# build_defaults.yaml or project_data.yaml.
-#
-@build.release           ||= get_release
-@build.version           ||= get_dash_version
-@build.gemversion        ||= get_dot_version
-@build.ipsversion        ||= get_ips_version
-@build.debversion        ||= get_debversion
-@build.origversion       ||= get_origversion
-@build.rpmversion        ||= get_rpmversion
-@build.rpmrelease        ||= get_rpmrelease
-@build.builder_data_file ||= 'builder_data.yaml'
-@build.team              = ENV['TEAM'] || 'dev'
-@build.random_mockroot   = ENV['RANDOM_MOCKROOT'] ? boolean_value(ENV['RANDOM_MOCKROOT']) : true
-@keychain_loaded         ||= FALSE
-@build_root              ||= Dir.pwd
-@build.build_date        ||= timestamp('-')
+@build.override_params_with_environment
 ##
 # For backwards compatibilty, we set build:@name to build:@project. @name was
 # renamed to @project in an effort to align the variable names with what has
