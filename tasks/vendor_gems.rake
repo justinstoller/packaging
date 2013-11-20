@@ -1,3 +1,5 @@
+RUBYGEM_MIRRORS = [ 'http://rubygems.delivery.puppetlabs.net' ]
+
 # This is an optional pre-tar-task, so we only want to present it if we're
 # using it
 if @build.pre_tar_task
@@ -90,8 +92,10 @@ if @build.pre_tar_task
       Bundler.rubygems.ui = ::RGProxy.new(Bundler.ui)
       Bundler.ui.level = "debug"
 
-      # Load the the Gemfile and resolve gems using RubyGems.org
+      # Load the the Gemfile and resolve gems using our mirror
       definition = Bundler.definition
+      sources = [Bundler::Source::Rubygems.new('remotes' => RUBYGEM_MIRRORS)]
+      definition.instance_variable_set( :@sources, sources )
       definition.validate_ruby!
       definition.resolve_remotely!
 
